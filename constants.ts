@@ -1,8 +1,11 @@
 
 import type { Transformation } from './types';
 
-export const TRANSFORMATIONS: Transformation[] = [
+export const getTransformations = (language: 'en' | 'zh'): Transformation[] => {
+  const transformations = {
+    en: [
   { title: "Custom Prompt", prompt: "CUSTOM", emoji: "✍️" },
+  { title: "Collectible Figure", prompt: "Turn this photo into a 1/7 scale collectible figure, in a realistic style, on a desk. On the screen, the 3D modeling of the figure is visible, and next to it, its edition box with 2D illustrations.", emoji: "🧸" },
   { title: "Cinematic Light", prompt: "Add a dramatic, cinematic lighting effect.", emoji: "🎬" },
   { title: "Watercolor", prompt: "Turn the image into a watercolor painting.", emoji: "🎨" },
   { title: "Vintage 70s", prompt: "Make it look like a vintage photograph from the 1970s.", emoji: "🎞️" },
@@ -53,4 +56,63 @@ export const TRANSFORMATIONS: Transformation[] = [
   { title: "Fairytale", prompt: "Transform it into a scene from a fairytale.", emoji: "🏰" },
   { title: "Chessboard Ground", prompt: "Make the ground look like a giant chessboard.", emoji: "♟️" },
   { title: "Magical Particles", prompt: "Surround the subject with shimmering, magical particles.", emoji: "✨" },
-];
+],
+    zh: [
+      { title: "自定义提示词", prompt: "CUSTOM", emoji: "✍️" },
+      { title: "手办模型", prompt: "将这张照片变成1/7比例的手办模型，写实风格，放在桌子上。屏幕上显示该手办的3D建模，旁边是带有2D插图的包装盒。", emoji: "🧸" },
+      { title: "电影光效", prompt: "添加戏剧性的电影灯光效果。", emoji: "🎬" },
+      { title: "水彩画", prompt: "将图像转换为水彩画。", emoji: "🎨" },
+      { title: "70年代复古", prompt: "让它看起来像1970年代的复古照片。", emoji: "🎞️" },
+      { title: "野花田", prompt: "在前景添加一片充满活力的野花田。", emoji: "🌸" },
+      { title: "冬日雪景", prompt: "将季节改为雪花纷飞的冬日景观。", emoji: "❄️" },
+      { title: "赛博朋克", prompt: "将场景转换为未来主义的赛博朋克城市。", emoji: "🤖" },
+      { title: "恐怖氛围", prompt: "营造恐怖、闹鬼的氛围，带有雾气和昏暗的光线。", emoji: "👻" },
+      { title: "炭笔素描", prompt: "让主体看起来像手绘的炭笔素描。", emoji: "✏️" },
+      { title: "天空之龙", prompt: "在天空中添加一条威严的飞龙。", emoji: "🐉" },
+      { title: "黑色电影", prompt: "将图像转换为黑白电影风格。", emoji: "🕵️" },
+      { title: "火星表面", prompt: "将主体放置在火星表面。", emoji: "🪐" },
+      { title: "魔法光环", prompt: "用魔法般的发光光环包围主体。", emoji: "✨" },
+      { title: "梵高风格", prompt: "以梵高《星夜》的风格重新诠释照片。", emoji: "🌌" },
+      { title: "水中倒影", prompt: "在水池中添加倒影。", emoji: "💧" },
+      { title: "黄金时刻", prompt: "将时间改为美丽的黄金时刻日落。", emoji: "🌅" },
+      { title: "16位像素艺术", prompt: "制作成16位电子游戏的像素艺术场景。", emoji: "👾" },
+      { title: "添加猫咪", prompt: "在主体旁边添加一只可爱毛茸茸的猫。", emoji: "🐈" },
+      { title: "东京夜景", prompt: "将背景变成繁华的东京夜街。", emoji: "🌃" },
+      { title: "迷幻色彩", prompt: "让颜色变得超饱和和迷幻。", emoji: "🍄" },
+      { title: "低多边形风格", prompt: "以低多边形几何风格渲染图像。", emoji: "🔷" },
+      { title: "全息图", prompt: "在主体周围添加未来主义的全息显示。", emoji: "🔮" },
+      { title: "魔法森林", prompt: "将背景改为有发光蘑菇的魔法森林。", emoji: "🌳" },
+      { title: "蒸汽朋克", prompt: "给主体添加蒸汽朋克风格的护目镜和齿轮。", emoji: "⚙️" },
+      { title: "双重曝光", prompt: "创建森林剪影的双重曝光效果。", emoji: "🌲" },
+      { title: "经典动漫", prompt: "让它看起来像经典动漫电影的一帧。", emoji: "🎌" },
+      { title: "彩虹", prompt: "在天空中添加一道彩虹。", emoji: "🌈" },
+      { title: "飘浮灯笼", prompt: "用飘浮的灯笼包围场景。", emoji: "🏮" },
+      { title: "罗马马赛克", prompt: "将其转换为古罗马马赛克。", emoji: "🏛️" },
+      { title: "银河天空", prompt: "让天空充满旋转的星系和星云。", emoji: "🌠" },
+      { title: "雨天", prompt: "添加温和的雨水效果和闪闪发光的水滴。", emoji: "☔" },
+      { title: "古代遗迹", prompt: "在背景中放置神秘的古代遗迹。", emoji: "🏺" },
+      { title: "中世纪盔甲", prompt: "将人物的服装改为中世纪盔甲。", emoji: "🛡️" },
+      { title: "古老羊皮纸", prompt: "让图像看起来像印在古老风化的羊皮纸上。", emoji: "📜" },
+      { title: "热气球", prompt: "在远处添加一个奇幻的热气球。", emoji: "🎈" },
+      { title: "水下世界", prompt: "创建场景的水下版本。", emoji: "🐠" },
+      { title: "波普艺术", prompt: "给它安迪·沃霍尔式的波普艺术风格。", emoji: "🖼️" },
+      { title: "幽灵", prompt: "在背景中添加幽灵般的幻影。", emoji: "👻" },
+      { title: "丛林场景", prompt: "将其变成茂密的丛林场景。", emoji: "🌴" },
+      { title: "大理石雕像", prompt: "让主体看起来像大理石雕像。", emoji: "🗿" },
+      { title: "镜头光晕", prompt: "添加戏剧性的镜头光晕效果。", emoji: "☀️" },
+      { title: "禅意花园", prompt: "将背景改为宁静的日式禅意花园。", emoji: "🏯" },
+      { title: "秋叶", prompt: "用五彩斑斓的秋叶覆盖景观。", emoji: "🍂" },
+      { title: "墨水画", prompt: "让它看起来像详细的墨水画。", emoji: "✒️" },
+      { title: "机器人伙伴", prompt: "在场景中添加一个友好的机器人伙伴。", emoji: "🤖" },
+      { title: "雪花球", prompt: "将场景放在水晶雪花球内。", emoji: "🔮" },
+      { title: "纪录片照片", prompt: "给它颗粒感、高对比度的黑白纪录片照片外观。", emoji: "📷" },
+      { title: "蝴蝶", prompt: "在主体周围添加飞舞的蝴蝶。", emoji: "🦋" },
+      { title: "童话故事", prompt: "将其转换为童话故事中的场景。", emoji: "🏰" },
+      { title: "棋盘地面", prompt: "让地面看起来像巨大的棋盘。", emoji: "♟️" },
+      { title: "魔法粒子", prompt: "用闪闪发光的魔法粒子包围主体。", emoji: "✨" },
+    ]
+  };
+  return transformations[language];
+};
+
+export const TRANSFORMATIONS = getTransformations('en');

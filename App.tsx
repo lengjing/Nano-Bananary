@@ -1,22 +1,30 @@
 
 import React, { useState, useCallback } from 'react';
-import { TRANSFORMATIONS } from './constants';
-import { editImage } from './services/geminiService';
-import type { GeneratedContent, Transformation } from './types';
+import { getTransformations } from './constants';
+import { editImage, generateTextToImage, editMultipleImages } from './services/geminiService';
+import type { GeneratedContent, Transformation, GenerationMode, ImageFile } from './types';
+import { translations } from './i18n';
 import TransformationSelector from './components/TransformationSelector';
 import ResultDisplay from './components/ResultDisplay';
 import LoadingSpinner from './components/LoadingSpinner';
 import ErrorMessage from './components/ErrorMessage';
 import ImageEditorCanvas from './components/ImageEditorCanvas';
+import MultiImageUploader from './components/MultiImageUploader';
+import MultiImageEditor from './components/MultiImageEditor';
+import ModeSelector from './components/ModeSelector';
 import { dataUrlToFile, embedWatermark } from './utils/fileUtils';
 import ImagePreviewModal from './components/ImagePreviewModal';
+import ApiKeyModal from './components/ApiKeyModal';
 
 type ActiveTool = 'mask' | 'none';
 
 const App: React.FC = () => {
+  const [language, setLanguage] = useState<'en' | 'zh'>('en');
+  const [generationMode, setGenerationMode] = useState<GenerationMode | null>(null);
   const [selectedTransformation, setSelectedTransformation] = useState<Transformation | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [multipleImages, setMultipleImages] = useState<ImageFile[]>([]);
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +32,10 @@ const App: React.FC = () => {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [activeTool, setActiveTool] = useState<ActiveTool>('none');
+  const [apiKey, setApiKey] = useState<string>(localStorage.getItem('gemini_api_key') || '');
+  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(!apiKey);
+  
+  const t = translations[language];
 
   const handleSelectTransformation = (transformation: Transformation) => {
     setSelectedTransformation(transformation);
@@ -52,15 +64,32 @@ const App: React.FC = () => {
     setActiveTool('none');
   };
 
+  const handleApiKeySubmit = (key: string) => {
+    setApiKey(key);
+    localStorage.setItem('gemini_api_key', key);
+    setShowApiKeyModal(false);
+  };
+
   const handleGenerate = useCallback(async () => {
-    if (!imagePreviewUrl || !selectedTransformation) {
-        setError("Please upload an image and select an effect first.");
+    if (!apiKey) {
+      setShowApiKeyModal(true);
+      return;
+    }
+    const promptToUse = selectedTransformation?.prompt === 'CUSTOM' ? customPrompt : selectedTransformation?.prompt || customPrompt;
+    
+    if (!promptToUse.trim()) {
+        setError(t.errors.enterPrompt);
+        return;
+    }
+
+    // Validation based on mode
+    if (generationMode === 'image-to-image' && !imagePreviewUrl) {
+        setError(t.errors.uploadImageFirst);
         return;
     }
     
-    const promptToUse = selectedTransformation.prompt === 'CUSTOM' ? customPrompt : selectedTransformation.prompt;
-    if (!promptToUse.trim()) {
-        setError("Please enter a prompt describing the change you want to see.");
+    if (generationMode === 'multi-image-to-image' && multipleImages.length === 0) {
+        setError(t.errors.uploadAtLeastOneImage);
         return;
     }
 
@@ -69,20 +98,23 @@ const App: React.FC = () => {
     setGeneratedContent(null);
 
     try {
-      const mimeType = imagePreviewUrl.split(';')[0].split(':')[1] ?? 'image/png';
-      const base64 = imagePreviewUrl.split(',')[1];
-      const maskBase64 = maskDataUrl ? maskDataUrl.split(',')[1] : null;
-
-      const result = await editImage(
-        base64, 
-        mimeType, 
-        promptToUse,
-        maskBase64
-      );
+      let result: GeneratedContent;
+      
+      if (generationMode === 'text-to-image') {
+        result = await generateTextToImage(promptToUse);
+      } else if (generationMode === 'multi-image-to-image') {
+        const maskBase64 = maskDataUrl ? maskDataUrl.split(',')[1] : null;
+        result = await editMultipleImages(multipleImages, promptToUse, maskBase64);
+      } else {
+        // image-to-image
+        const mimeType = imagePreviewUrl!.split(';')[0].split(':')[1] ?? 'image/png';
+        const base64 = imagePreviewUrl!.split(',')[1];
+        const maskBase64 = maskDataUrl ? maskDataUrl.split(',')[1] : null;
+        result = await editImage(base64, mimeType, promptToUse, maskBase64);
+      }
 
       if (result.imageUrl) {
-        // Embed invisible watermark
-        result.imageUrl = await embedWatermark(result.imageUrl, "Nano Bananary｜ZHO");
+        result.imageUrl = await embedWatermark(result.imageUrl, "Nano Bananary");
       }
 
       setGeneratedContent(result);
@@ -92,40 +124,84 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [imagePreviewUrl, selectedTransformation, maskDataUrl, customPrompt]);
+  }, [generationMode, imagePreviewUrl, multipleImages, selectedTransformation, maskDataUrl, customPrompt, t]);
 
   const handleUseResultAsInput = useCallback(async () => {
     if (!generatedContent?.imageUrl) return;
 
     try {
       const newFile = await dataUrlToFile(generatedContent.imageUrl, `edited-${Date.now()}.png`);
-      setSelectedFile(newFile);
-      setImagePreviewUrl(generatedContent.imageUrl);
+      
+      if (generationMode === 'multi-image-to-image') {
+        // Add to multiple images array
+        const newImageFile: ImageFile = {
+          file: newFile,
+          dataUrl: generatedContent.imageUrl,
+          id: `result-${Date.now()}`
+        };
+        setMultipleImages(prev => [...prev, newImageFile]);
+      } else {
+        // Set as single image
+        setSelectedFile(newFile);
+        setImagePreviewUrl(generatedContent.imageUrl);
+      }
+      
       setGeneratedContent(null);
       setError(null);
       setMaskDataUrl(null);
       setActiveTool('none');
-      setSelectedTransformation(null); // Go back to effect selection
+      setSelectedTransformation(null);
     } catch (err) {
       console.error("Failed to use image as input:", err);
       setError("Could not use the generated image as a new input.");
     }
-  }, [generatedContent]);
+  }, [generatedContent, generationMode]);
 
   const handleBackToSelection = () => {
     setSelectedTransformation(null);
   };
 
   const handleResetApp = () => {
+    setGenerationMode(null);
     setSelectedTransformation(null);
     setImagePreviewUrl(null);
     setSelectedFile(null);
+    setMultipleImages([]);
     setGeneratedContent(null);
     setError(null);
     setIsLoading(false);
     setMaskDataUrl(null);
     setCustomPrompt('');
     setActiveTool('none');
+  };
+  
+  const handleModeSelect = (mode: GenerationMode) => {
+    setGenerationMode(mode);
+    setSelectedTransformation(null);
+    setError(null);
+  };
+  
+  const handleBackToModeSelection = () => {
+    setGenerationMode(null);
+    setSelectedTransformation(null);
+  };
+  
+  const handleMultiImagesSelect = (images: ImageFile[]) => {
+    setMultipleImages(images);
+    setGeneratedContent(null);
+    setError(null);
+  };
+  
+  const handleRemoveImage = (id: string) => {
+    setMultipleImages(prev => prev.filter(img => img.id !== id));
+  };
+  
+  const handleClearAllImages = () => {
+    setMultipleImages([]);
+  };
+  
+  const toggleLanguage = () => {
+    setLanguage(prev => prev === 'en' ? 'zh' : 'en');
   };
 
   const handleOpenPreview = (url: string) => setPreviewImageUrl(url);
@@ -135,37 +211,76 @@ const App: React.FC = () => {
     setActiveTool(current => (current === 'mask' ? 'none' : 'mask'));
   };
 
-  const isGenerateDisabled = !imagePreviewUrl || isLoading || (selectedTransformation?.prompt === 'CUSTOM' && !customPrompt.trim());
+  const isGenerateDisabled = isLoading || 
+    (generationMode === 'text-to-image' && !customPrompt.trim()) ||
+    (generationMode === 'image-to-image' && (!imagePreviewUrl || (selectedTransformation?.prompt === 'CUSTOM' && !customPrompt.trim()))) ||
+    (generationMode === 'multi-image-to-image' && (multipleImages.length === 0 || !customPrompt.trim()));
 
   return (
     <div className="min-h-screen bg-black text-gray-300 font-sans">
       <header className="bg-black/60 backdrop-blur-lg sticky top-0 z-20 p-4 border-b border-white/10">
         <div className="container mx-auto flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-yellow-400 cursor-pointer" onClick={handleResetApp}>
-            🍌 Nano Bananary｜ZHO
+            {t.header.title}
           </h1>
+          <button
+            onClick={toggleLanguage}
+            className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 rounded-md transition-colors"
+          >
+            {language === 'en' ? '中文' : 'EN'}
+          </button>
         </div>
       </header>
 
       <main>
-        {!selectedTransformation ? (
-          <TransformationSelector 
-            transformations={TRANSFORMATIONS} 
-            onSelect={handleSelectTransformation} 
-            hasPreviousResult={!!imagePreviewUrl}
+        {!generationMode ? (
+          <ModeSelector 
+            selectedMode={generationMode!}
+            onModeSelect={handleModeSelect}
+            t={t}
           />
+        ) : !selectedTransformation && generationMode !== 'text-to-image' ? (
+          <div>
+            <div className="container mx-auto p-4 md:p-8">
+              <button
+                onClick={handleBackToModeSelection}
+                className="flex items-center gap-2 text-orange-500 hover:text-orange-400 transition-colors duration-200 py-2 px-4 rounded-lg hover:bg-gray-900 mb-6"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                {t.transformations.backToModeSelection}
+              </button>
+            </div>
+            <TransformationSelector 
+              transformations={getTransformations(language)} 
+              onSelect={handleSelectTransformation} 
+              hasPreviousResult={!!imagePreviewUrl || multipleImages.length > 0}
+            />
+          </div>
         ) : (
           <div className="container mx-auto p-4 md:p-8 animate-fade-in">
-            <div className="mb-8">
+            <div className="mb-8 flex gap-4">
               <button
-                onClick={handleBackToSelection}
+                onClick={handleBackToModeSelection}
                 className="flex items-center gap-2 text-orange-500 hover:text-orange-400 transition-colors duration-200 py-2 px-4 rounded-lg hover:bg-gray-900"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
-                Choose Another Effect
+                {t.transformations.backToModeSelection}
               </button>
+              {generationMode !== 'text-to-image' && (
+                <button
+                  onClick={handleBackToSelection}
+                  className="flex items-center gap-2 text-orange-500 hover:text-orange-400 transition-colors duration-200 py-2 px-4 rounded-lg hover:bg-gray-900"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  {t.transformations.backToSelection}
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -173,42 +288,103 @@ const App: React.FC = () => {
               <div className="flex flex-col gap-6 p-6 bg-gray-950/60 backdrop-blur-lg rounded-xl border border-white/10 shadow-2xl shadow-black/20">
                 <div>
                   <div className="mb-4">
-                    <h2 className="text-xl font-semibold mb-1 text-orange-500 flex items-center gap-3">
-                      <span className="text-3xl">{selectedTransformation.emoji}</span>
-                      {selectedTransformation.title}
-                    </h2>
-                    {selectedTransformation.prompt === 'CUSTOM' ? (
+                    {generationMode === 'text-to-image' ? (
+                      <div>
+                        <h2 className="text-xl font-semibold mb-1 text-orange-500 flex items-center gap-3">
+                          <span className="text-3xl">✍️</span>
+                          {t.transformations.textToImage}
+                        </h2>
                         <textarea
+                          value={customPrompt}
+                          onChange={(e) => setCustomPrompt(e.target.value)}
+                          placeholder={t.transformations.customPromptPlaceholder}
+                          rows={3}
+                          className="w-full mt-2 p-3 bg-gray-900 border border-white/20 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors placeholder-gray-500"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <h2 className="text-xl font-semibold mb-1 text-orange-500 flex items-center gap-3">
+                          <span className="text-3xl">{selectedTransformation?.emoji}</span>
+                          {selectedTransformation?.title}
+                        </h2>
+                        {selectedTransformation?.prompt === 'CUSTOM' ? (
+                          <textarea
                             value={customPrompt}
                             onChange={(e) => setCustomPrompt(e.target.value)}
-                            placeholder="e.g., 'make the sky a vibrant sunset' or 'add a small red boat on the water'"
+                            placeholder={t.transformations.customPromptPlaceholder}
                             rows={3}
                             className="w-full mt-2 p-3 bg-gray-900 border border-white/20 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors placeholder-gray-500"
-                        />
-                    ) : (
-                       <p className="text-gray-400">{selectedTransformation.prompt}</p>
+                          />
+                        ) : generationMode === 'multi-image-to-image' ? (
+                          <textarea
+                            value={customPrompt}
+                            onChange={(e) => setCustomPrompt(e.target.value)}
+                            placeholder={t.transformations.multiImagePromptPlaceholder}
+                            rows={3}
+                            className="w-full mt-2 p-3 bg-gray-900 border border-white/20 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors placeholder-gray-500"
+                          />
+                        ) : (
+                          <p className="text-gray-400">{selectedTransformation?.prompt}</p>
+                        )}
+                      </div>
                     )}
                   </div>
                   
-                  <ImageEditorCanvas
-                    onImageSelect={handleImageSelect}
-                    initialImageUrl={imagePreviewUrl}
-                    onMaskChange={setMaskDataUrl}
-                    onClearImage={handleClearImage}
-                    isMaskToolActive={activeTool === 'mask'}
-                  />
-
-                  {imagePreviewUrl && (
-                    <div className="mt-4">
-                        <button
+                  {generationMode === 'text-to-image' ? (
+                    <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
+                      <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <p className="mt-2 text-gray-400">{t.transformations.noImageNeeded}</p>
+                    </div>
+                  ) : generationMode === 'multi-image-to-image' ? (
+                    <div>
+                      <MultiImageEditor
+                        images={multipleImages}
+                        onImagesSelect={handleMultiImagesSelect}
+                        onRemoveImage={handleRemoveImage}
+                        onClearAll={handleClearAllImages}
+                        onMaskChange={setMaskDataUrl}
+                        isMaskToolActive={activeTool === 'mask'}
+                        t={t}
+                      />
+                      {multipleImages.length > 0 && (
+                        <div className="mt-4">
+                          <button
                             onClick={toggleMaskTool}
                             className={`w-full flex items-center justify-center gap-2 py-2 px-3 text-sm font-semibold rounded-md transition-colors duration-200 ${
-                                activeTool === 'mask' ? 'bg-gradient-to-r from-orange-500 to-yellow-400 text-black' : 'bg-gray-800 hover:bg-gray-700'
+                              activeTool === 'mask' ? 'bg-gradient-to-r from-orange-500 to-yellow-400 text-black' : 'bg-gray-800 hover:bg-gray-700'
                             }`}
-                        >
+                          >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z" /></svg>
-                            <span>Draw Mask</span>
-                        </button>
+                            <span>{t.transformations.drawMask}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <ImageEditorCanvas
+                        onImageSelect={handleImageSelect}
+                        initialImageUrl={imagePreviewUrl}
+                        onMaskChange={setMaskDataUrl}
+                        onClearImage={handleClearImage}
+                        isMaskToolActive={activeTool === 'mask'}
+                      />
+                      {imagePreviewUrl && (
+                        <div className="mt-4">
+                          <button
+                            onClick={toggleMaskTool}
+                            className={`w-full flex items-center justify-center gap-2 py-2 px-3 text-sm font-semibold rounded-md transition-colors duration-200 ${
+                              activeTool === 'mask' ? 'bg-gradient-to-r from-orange-500 to-yellow-400 text-black' : 'bg-gray-800 hover:bg-gray-700'
+                            }`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L15.232 5.232z" /></svg>
+                            <span>{t.transformations.drawMask}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                   
@@ -223,14 +399,14 @@ const App: React.FC = () => {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        <span>Generating...</span>
+                        <span>{t.transformations.generating}</span>
                       </>
                     ) : (
                       <>
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                         </svg>
-                        <span>Generate Image</span>
+                        <span>{t.transformations.generateImage}</span>
                       </>
                     )}
                   </button>
@@ -239,7 +415,7 @@ const App: React.FC = () => {
 
               {/* Output Column */}
               <div className="flex flex-col p-6 bg-gray-950/60 backdrop-blur-lg rounded-xl border border-white/10 shadow-2xl shadow-black/20">
-                <h2 className="text-xl font-semibold mb-4 text-orange-500 self-start">Result</h2>
+                <h2 className="text-xl font-semibold mb-4 text-orange-500 self-start">{t.transformations.result}</h2>
                 {isLoading && <div className="flex-grow flex items-center justify-center"><LoadingSpinner /></div>}
                 {error && <div className="flex-grow flex items-center justify-center w-full"><ErrorMessage message={error} /></div>}
                 {!isLoading && !error && generatedContent && (
@@ -255,7 +431,7 @@ const App: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <p className="mt-2">Your generated image will appear here.</p>
+                    <p className="mt-2">{t.transformations.resultPlaceholder}</p>
                   </div>
                 )}
               </div>
@@ -264,6 +440,11 @@ const App: React.FC = () => {
         )}
       </main>
       <ImagePreviewModal imageUrl={previewImageUrl} onClose={handleClosePreview} />
+      <ApiKeyModal 
+        isOpen={showApiKeyModal} 
+        onSubmit={handleApiKeySubmit} 
+        t={t} 
+      />
     </div>
   );
 };

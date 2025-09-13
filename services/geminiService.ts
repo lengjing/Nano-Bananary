@@ -1,11 +1,129 @@
 import { GoogleGenAI, Modality } from "@google/genai";
-import type { GeneratedContent } from '../types';
+import type { GeneratedContent, ImageFile } from '../types';
 
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable is not set.");
+const getApiKey = () => {
+  return process.env.API_KEY || localStorage.getItem('gemini_api_key') || '';
+};
+
+const getAI = () => {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error("API key is required");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
+export async function generateTextToImage(prompt: string): Promise<GeneratedContent> {
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image-preview',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseModalities: [Modality.IMAGE, Modality.TEXT],
+      },
+    });
+
+    const result: GeneratedContent = { imageUrl: null, text: null };
+    const responseParts = response.candidates?.[0]?.content?.parts;
+
+    if (responseParts) {
+      for (const part of responseParts) {
+        if (part.text) {
+          result.text = (result.text ? result.text + "\n" : "") + part.text;
+        } else if (part.inlineData) {
+          const base64ImageBytes: string = part.inlineData.data;
+          result.imageUrl = `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+        }
+      }
+    }
+
+    if (!result.imageUrl) {
+      throw new Error("The model did not return an image. Please try a different prompt.");
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Error calling Gemini API for text-to-image:", error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to generate image: ${error.message}`);
+    }
+    throw new Error("An unknown error occurred while communicating with the API.");
+  }
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export async function editMultipleImages(
+    images: ImageFile[],
+    prompt: string,
+    maskBase64?: string | null
+): Promise<GeneratedContent> {
+  try {
+    const parts: any[] = [];
+    
+    // Add all images
+    for (const image of images) {
+      const base64 = image.dataUrl.split(',')[1];
+      const mimeType = image.dataUrl.split(';')[0].split(':')[1] ?? 'image/png';
+      parts.push({
+        inlineData: {
+          data: base64,
+          mimeType: mimeType,
+        },
+      });
+    }
+    
+    // Add mask if provided
+    if (maskBase64) {
+      parts.push({
+        inlineData: {
+          data: maskBase64,
+          mimeType: 'image/png',
+        },
+      });
+    }
+    
+    // Add prompt
+    const fullPrompt = maskBase64 
+      ? `Apply the following instruction only to the masked area: "${prompt}". Preserve the unmasked areas.`
+      : prompt;
+    parts.push({ text: fullPrompt });
+
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image-preview',
+      contents: { parts },
+      config: {
+        responseModalities: [Modality.IMAGE, Modality.TEXT],
+      },
+    });
+
+    const result: GeneratedContent = { imageUrl: null, text: null };
+    const responseParts = response.candidates?.[0]?.content?.parts;
+
+    if (responseParts) {
+      for (const part of responseParts) {
+        if (part.text) {
+          result.text = (result.text ? result.text + "\n" : "") + part.text;
+        } else if (part.inlineData) {
+          const base64ImageBytes: string = part.inlineData.data;
+          result.imageUrl = `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+        }
+      }
+    }
+
+    if (!result.imageUrl) {
+      throw new Error("The model did not return an image. Please try a different prompt or images.");
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Error calling Gemini API for multi-image:", error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to generate image: ${error.message}`);
+    }
+    throw new Error("An unknown error occurred while communicating with the API.");
+  }
+}
 
 export async function editImage(
     base64ImageData: string, 
@@ -36,6 +154,7 @@ export async function editImage(
 
     parts.push({ text: fullPrompt });
 
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image-preview',
       contents: { parts },
